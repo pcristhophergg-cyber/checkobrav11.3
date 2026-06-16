@@ -78,13 +78,33 @@ const tips=[
 let state={currentUser:null,route:'login',param:null,testMode:false,secretOpen:false,data:{states:{},checks:{},settings:{passwordsDisabled:false,notificationsEnabled:false},notifications:[],observations:[],program:[],papas:[],notes:[],history:[],qualityNotes:[],restrictions:[],documents:[],techNotices:[]}};
 let historyStack=[], forwardStack=[];
 function load(){try{const s=JSON.parse(localStorage.getItem('checkobra_v11_base_real'));if(s)state={...state,...s,data:{...state.data,...(s.data||{})}}}catch{}}
-function save(){localStorage.setItem('checkobra_v11_base_real',JSON.stringify(state));syncCloud();}
-let syncing=false; async function syncCloud(){if(!cloudReady||syncing)return;try{await setDoc(doc(db,'checkobra','v11_base_real'),{...state.data,updatedAt:serverTimestamp()},{merge:true})}catch(e){console.warn('No se pudo guardar en nube',e)}}
-function listenCloud(){if(!cloudReady)return;onSnapshot(doc(db,'checkobra','v11_base_real'),snap=>{if(!snap.exists())return;syncing=true;const d=snap.data();delete d.updatedAt;state.data={...state.data,...d};localStorage.setItem('checkobra_v11_base_real',JSON.stringify(state));syncing=false;render();});}
+function saveLocal(){localStorage.setItem('checkobra_v11_base_real',JSON.stringify(state));}
+function save(sync=true){saveLocal();if(sync)syncCloud();}
+let syncing=false, cloudHydrated=false;
+async function syncCloud(){
+  // Evita que un navegador recién abierto suba datos locales vacíos antes de recibir Firebase.
+  if(!cloudReady||syncing||!cloudHydrated)return;
+  try{await setDoc(doc(db,'checkobra','v11_base_real'),{...state.data,updatedAt:serverTimestamp()},{merge:true})}
+  catch(e){console.warn('No se pudo guardar en nube',e)}
+}
+function listenCloud(){
+  if(!cloudReady){cloudHydrated=true;return;}
+  onSnapshot(doc(db,'checkobra','v11_base_real'),snap=>{
+    syncing=true;
+    cloudHydrated=true;
+    if(snap.exists()){
+      const d=snap.data();delete d.updatedAt;
+      state.data={...state.data,...d};
+      saveLocal();
+    }
+    syncing=false;
+    render();
+  },e=>{console.warn('No se pudo leer nube',e);cloudHydrated=true;});
+}
 function u(){return users.find(x=>x.id===state.currentUser)}
-function go(route,param=null){if(state.route!==route)historyStack.push({route:state.route,param:state.param});forwardStack=[];state.route=route;state.param=param;save();render();}
-function back(){const x=historyStack.pop();if(!x)return;forwardStack.push({route:state.route,param:state.param});state.route=x.route;state.param=x.param;save();render();}
-function forward(){const x=forwardStack.pop();if(!x)return;historyStack.push({route:state.route,param:state.param});state.route=x.route;state.param=x.param;save();render();}
+function go(route,param=null){if(state.route!==route)historyStack.push({route:state.route,param:state.param});forwardStack=[];state.route=route;state.param=param;save(false);render();}
+function back(){const x=historyStack.pop();if(!x)return;forwardStack.push({route:state.route,param:state.param});state.route=x.route;state.param=x.param;save(false);render();}
+function forward(){const x=forwardStack.pop();if(!x)return;historyStack.push({route:state.route,param:state.param});state.route=x.route;state.param=x.param;save(false);render();}
 function home(){go('home')}
 function keyOf(dept,part,room='DEPTO'){return `${dept}|${part}|${room}`}
 function checkKey(dept,part,room='DEPTO'){return `ck|${dept}|${part}|${room}`}
@@ -187,16 +207,16 @@ function produccion(){return appShell(`<h2>Producción</h2>${graphBlock('Producc
 function firstPass(){const obs=state.data.observations.length, val=allStateEntries().filter(x=>x.status==='Validada Calidad').length;return val+obs?Math.round(val/(val+obs)*100):100}
 function topObserved(){const m={};state.data.observations.forEach(o=>m[o.part]=(m[o.part]||0)+1);return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`${k}: ${v}`).join('<br>')||'Sin datos'}
 function supervisorDetalle(id){const s=users.find(x=>x.id===id);return appShell(`<h2>${s.name}</h2><div class="kpi"><span>Cumplimiento</span><b>${programPct(id)}%</b></div><div class="kpi"><span>Compromisos pendientes</span><b>${pendingProgramFor(s).length}</b></div><div class="kpi" onclick="go('observaciones')"><span>Obs. abiertas</span><b>${observationsForUser(s).length}</b></div><div class="kpi"><span>Papas</span><b>${papasFor(s).length}</b></div>`)}
-function seed(){if(localStorage.getItem('checkobra_v11_base_real_seed'))return;state.data={states:{},checks:{},settings:{passwordsDisabled:false,notificationsEnabled:false},notifications:[],observations:[],program:[],papas:[],notes:[],history:[],qualityNotes:[],restrictions:[],documents:[],techNotices:[]};localStorage.setItem('checkobra_v11_base_real_seed','1');save()}
-function login(){const selected=users.find(x=>x.id===v('loginUser'));const passOk=selected&&(state.testMode||state.data.settings?.passwordsDisabled||selected.pass===v('loginPass'));if(!passOk){alert('Clave incorrecta');return}state.currentUser=selected.id;state.route='home';save();render()}
-function logout(){state.currentUser=null;state.route='login';save();render()}
+function seed(){if(localStorage.getItem('checkobra_v11_base_real_seed'))return;state.data={states:{},checks:{},settings:{passwordsDisabled:false,notificationsEnabled:false},notifications:[],observations:[],program:[],papas:[],notes:[],history:[],qualityNotes:[],restrictions:[],documents:[],techNotices:[]};localStorage.setItem('checkobra_v11_base_real_seed','1');save(false)}
+function login(){const selected=users.find(x=>x.id===v('loginUser'));const passOk=selected&&(state.testMode||state.data.settings?.passwordsDisabled||selected.pass===v('loginPass'));if(!passOk){alert('Clave incorrecta');return}state.currentUser=selected.id;state.route='home';save(false);render()}
+function logout(){state.currentUser=null;state.route='login';save(false);render()}
 function v(id){return document.getElementById(id)?.value||''}
 function render(){const app=document.getElementById('app');if(!state.currentUser||state.route==='login'){app.innerHTML=loginView();return}const routes={home:homeView,misPartidas,edificio,depto,revision,programa,programaHist,papas,observaciones,centroCalidad,biblioteca,notas,prioridades,centroGestion,restricciones,historial,reportes,produccion,atrasos,supervisorDetalle,documentos,comunicadosTecnicos};app.innerHTML=(routes[state.route]||homeView)(state.param)}
 window.enableNotifications=enableNotifications;window.togglePasswordView=togglePasswordView;window.togglePasswordsDisabled=togglePasswordsDisabled;window.autoCheck=autoCheck;window.login=login;window.logout=logout;window.toggleTestMode=toggleTestMode;window.quickSwitchUser=quickSwitchUser;window.go=go;window.back=back;window.forward=forward;window.home=home;window.saveReview=saveReview;window.qualityApprove=qualityApprove;window.qualityObserve=qualityObserve;window.addProgram=addProgram;window.acceptProgram=acceptProgram;window.restrictProgram=restrictProgram;window.markProgram=markProgram;window.addPapa=addPapa;window.closePapa=closePapa;window.obsProcess=obsProcess;window.closeObs=closeObs;window.addNote=addNote;window.toggleNote=toggleNote;window.deleteNote=deleteNote;window.closeRestriction=closeRestriction;window.addDocument=addDocument;window.addTechNotice=addTechNotice;window.render=render;window.updateRangeLabel=updateRangeLabel;window.secretTap=secretTap;window.deleteDocument=deleteDocument;
 
 
 let secretTapCount=0, secretTapTimer=null;
-function secretTap(){if(!state.currentUser||state.currentUser!=='paul')return;secretTapCount++;clearTimeout(secretTapTimer);secretTapTimer=setTimeout(()=>secretTapCount=0,1200);if(secretTapCount>=5){state.secretOpen=!state.secretOpen;secretTapCount=0;save();render();}}
-function toggleTestMode(){state.testMode=!state.testMode;save();render()}
-function quickSwitchUser(){const id=v('quickUser');if(!id)return;state.currentUser=id;state.route='home';save();render()}
+function secretTap(){if(!state.currentUser||state.currentUser!=='paul')return;secretTapCount++;clearTimeout(secretTapTimer);secretTapTimer=setTimeout(()=>secretTapCount=0,1200);if(secretTapCount>=5){state.secretOpen=!state.secretOpen;secretTapCount=0;save(false);render();}}
+function toggleTestMode(){state.testMode=!state.testMode;save(false);render()}
+function quickSwitchUser(){const id=v('quickUser');if(!id)return;state.currentUser=id;state.route='home';save(false);render()}
 load();seed();listenCloud();render();
